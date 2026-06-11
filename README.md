@@ -166,6 +166,11 @@ AWS_ACCESS_KEY_ID=AKIA...
 AWS_SECRET_ACCESS_KEY=...
 AWS_REGION=us-east-1
 BEDROCK_MODEL_ID=global.anthropic.claude-sonnet-4-5-20250929-v1:0
+
+# Jira (required for POST /rca)
+JIRA_BASE_URL=https://stayntouch.atlassian.net
+JIRA_EMAIL=you@stayntouch.com
+JIRA_API_TOKEN=<your-jira-api-token>
 ```
 
 ### 3. Pull Ollama models (one-time, on host machine)
@@ -191,6 +196,7 @@ docker compose up --build
 | `GET /project/{key}` | Resolve a Jira project key to a service name |
 | `POST /chat` | Chat using local Ollama (`qwen2.5-coder:7b`) |
 | `POST /chat/bedrock` | Chat using AWS Bedrock (Claude Sonnet) |
+| `POST /rca` | Full Jira RCA: fetch issue → RAG → post Jira comment |
 | `DELETE /session/{id}` | Clear conversation history for a session |
 | `POST /reindex` | Rebuild index for all services |
 | `POST /reindex/{service}` | Rebuild index for one service only |
@@ -202,6 +208,19 @@ POST /chat/bedrock
 { "message": "ibe: why is checkout failing?", "session_id": "debug-1" }
 
 → { "response": "...", "sources": ["ibe-api/src/services/cart.service.ts"] }
+```
+
+```json
+POST /rca
+{ "input": "ibe: IBE-1152" }
+
+→ {
+    "response": "...",
+    "sources": ["ibe-api/src/services/cart.service.ts"],
+    "issue_key": "IBE-1152",
+    "comment_posted": true,
+    "output": "✅ RCA posted to IBE-1152.\n\n..."
+  }
 ```
 
 Message format: `<service>: <question>` — the service prefix routes the query to the right index and system prompt.
@@ -239,4 +258,9 @@ docker network connect codebot_default n8n
 
 ### Import the Jira RCA workflow
 
-Open `http://localhost:5678` → Workflows → Import from file → select `docs/n8n-jira-rca-chat-workflow.json` → activate → open the **Chat** panel.
+Two workflow options — import whichever fits your setup:
+
+- **Simple (recommended)** `docs/n8n-rca-simple-workflow.json` — 3 nodes, requires `JIRA_*` env vars in codebot; just type `ibe: IBE-1152` in chat
+- **Full** `docs/n8n-jira-rca-chat-workflow.json` — 8 nodes with Jira credentials in n8n instead of codebot
+
+Open `http://localhost:5678` → Workflows → Import from file → select the workflow file → activate → open the **Chat** panel.
