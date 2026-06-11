@@ -9,7 +9,10 @@
       "name": "Chat Trigger",
       "type": "@n8n/n8n-nodes-langchain.chatTrigger",
       "typeVersion": 1.1,
-      "position": [240, 300],
+      "position": [
+        240,
+        300
+      ],
       "webhookId": "jira-rca-chat"
     },
     {
@@ -21,7 +24,10 @@
       "name": "Extract Issue Key",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [460, 300]
+      "position": [
+        460,
+        300
+      ]
     },
     {
       "parameters": {
@@ -35,7 +41,10 @@
       "name": "Fetch Jira Issue",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [680, 300],
+      "position": [
+        680,
+        300
+      ],
       "credentials": {
         "httpBasicAuth": {
           "id": "jira-basic-auth",
@@ -46,13 +55,16 @@
     {
       "parameters": {
         "language": "javaScript",
-        "jsCode": "function extractText(node) {\n  if (!node) return '';\n  if (node.type === 'text') return node.text || '';\n  if (node.content) return node.content.map(extractText).join(' ');\n  return '';\n}\n\nconst issue = $('Fetch Jira Issue').item.json;\nconst { service, additionalContext } = $('Extract Issue Key').item.json;\nconst issueKey = issue.key;\nconst summary = issue.fields.summary;\nconst descAdf = issue.fields.description;\nconst description = descAdf ? extractText(descAdf).trim() : 'No description provided.';\n\nconst parts = [\n  `${service}: You are performing Root Cause Analysis (RCA) for a production bug. Analyse the codebase carefully.`,\n  ``,\n  `Ticket: ${issueKey}`,\n  `Summary: ${summary}`,\n  ``,\n  `Description:`,\n  description,\n];\n\nif (additionalContext) {\n  parts.push(``, `Additional context provided by reporter:`, additionalContext);\n}\n\nparts.push(\n  ``,\n  `Based on the codebase, answer:`,\n  `1. Which files and functions are involved in the flow described above?`,\n  `2. Where exactly is the root cause in the code (file path and function)?`,\n  `3. What is the precise fix with a code snippet?`\n);\n\nreturn { issueKey, service, message: parts.join('\\n') };"
+        "jsCode": "function extractText(node) {\n  if (!node) return '';\n  if (node.type === 'text') return node.text || '';\n  if (node.content) return node.content.map(extractText).join(' ');\n  return '';\n}\n\nconst issue = $('Fetch Jira Issue').item.json;\nconst { service, additionalContext } = $('Extract Issue Key').item.json;\nconst issueKey = issue.key;\nconst summary = issue.fields.summary;\nconst descAdf = issue.fields.description;\nconst description = descAdf ? extractText(descAdf).trim() : 'No description provided.';\n\nconst parts = [\n  `${service}: You are performing Root Cause Analysis (RCA) for a production bug. Analyse the codebase carefully.`,\n  ``,\n  `Ticket: ${issueKey}`,\n  `Summary: ${summary}`,\n  ``,\n  `Description:`,\n  description,\n];\n\nif (additionalContext) {\n  parts.push(``, `Additional context provided by reporter:`, additionalContext);\n}\n\nparts.push(\n  ``,\n  `IMPORTANT: Base your entire analysis on the code snippets retrieved for you. Only reference`,\n  `file paths that appear verbatim in those snippets. If a relevant file is not in the context,`,\n  `say \"not retrieved\" rather than guessing a path.`,\n  ``,\n  `Based on the retrieved code, answer:`,\n  `1. Which files and functions (visible in the context) are involved in this flow?`,\n  `2. Where exactly is the root cause (file path and function from the context)?`,\n  `3. What is the precise fix with a code snippet from the retrieved code?`\n);\n\nreturn { issueKey, service, message: parts.join('\\n') };"
       },
       "id": "n4",
       "name": "Build RAG Query",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [900, 300]
+      "position": [
+        900,
+        300
+      ]
     },
     {
       "parameters": {
@@ -62,8 +74,14 @@
         "specifyBody": "keypair",
         "bodyParameters": {
           "parameters": [
-            { "name": "session_id", "value": "=jira-{{ $json.issueKey }}" },
-            { "name": "message", "value": "={{ $json.message }}" }
+            {
+              "name": "session_id",
+              "value": "=jira-{{ $json.issueKey }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $json.message }}"
+            }
           ]
         },
         "options": {}
@@ -72,7 +90,10 @@
       "name": "Ask codebot",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1120, 300]
+      "position": [
+        1120,
+        300
+      ]
     },
     {
       "parameters": {
@@ -83,7 +104,10 @@
       "name": "Format RCA Comment",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1340, 300]
+      "position": [
+        1340,
+        300
+      ]
     },
     {
       "parameters": {
@@ -95,7 +119,10 @@
         "specifyBody": "keypair",
         "bodyParameters": {
           "parameters": [
-            { "name": "body", "value": "={{ $json.jiraBody }}" }
+            {
+              "name": "body",
+              "value": "={{ $json.jiraBody }}"
+            }
           ]
         },
         "options": {}
@@ -104,7 +131,10 @@
       "name": "Post Jira Comment",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1560, 300],
+      "position": [
+        1560,
+        300
+      ],
       "credentials": {
         "httpBasicAuth": {
           "id": "jira-basic-auth",
@@ -121,43 +151,88 @@
       "name": "Respond to Chat",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1780, 300]
+      "position": [
+        1780,
+        300
+      ]
     }
   ],
   "connections": {
     "Chat Trigger": {
       "main": [
-        [{ "node": "Extract Issue Key", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Extract Issue Key",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Extract Issue Key": {
       "main": [
-        [{ "node": "Fetch Jira Issue", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Fetch Jira Issue",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Fetch Jira Issue": {
       "main": [
-        [{ "node": "Build RAG Query", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Build RAG Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Build RAG Query": {
       "main": [
-        [{ "node": "Ask codebot", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Ask codebot",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Ask codebot": {
       "main": [
-        [{ "node": "Format RCA Comment", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Format RCA Comment",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Format RCA Comment": {
       "main": [
-        [{ "node": "Post Jira Comment", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Post Jira Comment",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Post Jira Comment": {
       "main": [
-        [{ "node": "Respond to Chat", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Respond to Chat",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
   },
