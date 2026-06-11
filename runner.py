@@ -1,4 +1,5 @@
 import asyncio
+import httpx
 import os
 import traceback
 from collections import OrderedDict
@@ -16,6 +17,10 @@ from llama_index.embeddings.ollama import OllamaEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from config import load_services, ServiceConfig
 from message import parse_message
+from jira import (
+    parse_rca_input, extract_adf_text, build_rca_message,
+    md_to_jira, fetch_jira_issue, post_jira_comment,
+)
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
@@ -23,6 +28,9 @@ AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "global.anthropic.claude-sonnet-4-5-20250929-v1:0")
 SERVICES_CONFIG_PATH = os.getenv("SERVICES_CONFIG_PATH", "/app/services.yaml")
+JIRA_BASE_URL = os.getenv("JIRA_BASE_URL", "")
+JIRA_EMAIL = os.getenv("JIRA_EMAIL", "")
+JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN", "")
 
 local_llm = Ollama(base_url=OLLAMA_BASE_URL, model="qwen2.5-coder:7b", request_timeout=120.0)
 
@@ -165,6 +173,11 @@ class ChatRequest(BaseModel):
     session_id: str = "default"
 
 
+class RcaRequest(BaseModel):
+    input: str
+    session_id: str = ""
+
+
 async def _chat(request: ChatRequest, llm, llm_key: str):
     if not services:
         raise HTTPException(status_code=503, detail="RAG engine is initializing")
@@ -230,6 +243,80 @@ def clear_session(session_id: str):
         for llm_sessions in svc["sessions"].values():
             llm_sessions.pop(session_id, None)
     return {"cleared": session_id}
+
+
+@app.post("/rca")
+async def rca(request: RcaRequest):
+    if not bedrock_llm:
+        raise HTTPException(status_code=503, detail="AWS credentials not configured")
+    if not all([JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN]):
+        raise HTTPException(
+            status_code=503,
+            detail="Jira credentials not configured — set JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN",
+        )
+    if not services:
+        raise HTTPException(status_code=503, detail="RAG engine is initializing")
+
+    try:
+        service_name, issue_key, additional_context = parse_rca_input(request.input)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if service_name not in services:
+        valid = ", ".join(services.keys())
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown service '{service_name}'. Valid services: {valid}",
+        )
+
+    try:
+        issue = await fetch_jira_issue(JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN, issue_key)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Jira API error fetching {issue_key}: {e.response.status_code}")
+
+    summary = issue["fields"]["summary"]
+    desc_adf = issue["fields"].get("description")
+    description = extract_adf_text(desc_adf).strip() if desc_adf else "No description provided."
+
+    session_id = request.session_id or f"jira-{issue_key}"
+    message = build_rca_message(service_name, issue_key, summary, description, additional_context)
+
+    try:
+        engine = _get_engine(session_id, service_name, bedrock_llm, "bedrock")
+        response = await asyncio.to_thread(engine.chat, message)
+        rca_text = response.response
+        sources = list({
+            node.metadata.get("file_path", "unknown")
+            for node in response.source_nodes
+        })
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+    jira_body = "\n".join([
+        "h2. \U0001f916 AI-Generated Root Cause Analysis",
+        "",
+        md_to_jira(rca_text),
+        "",
+        "----",
+        "_Generated automatically by codebot. Please review before acting on it._",
+    ])
+
+    try:
+        await post_jira_comment(JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN, issue_key, jira_body)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to post Jira comment on {issue_key}: {e.response.status_code}",
+        )
+
+    return {
+        "response": rca_text,
+        "sources": sources,
+        "issue_key": issue_key,
+        "comment_posted": True,
+        "output": f"✅ RCA posted to {issue_key}.\n\n{rca_text}",
+    }
 
 
 @app.post("/reindex")
