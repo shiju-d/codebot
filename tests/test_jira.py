@@ -42,6 +42,15 @@ def test_parse_rca_empty_service_raises():
     with pytest.raises(ValueError):
         parse_rca_input(": IBE-1152")
 
+def test_parse_rca_context_after_url():
+    # anything after the issue key on the same line or new lines is additional context
+    service, key, ctx = parse_rca_input(
+        "ibe: IBE-1152\nStack trace line 1\nStack trace line 2"
+    )
+    assert service == "ibe"
+    assert key == "IBE-1152"
+    assert "Stack trace line 1" in ctx
+
 
 # --- extract_adf_text ---
 
@@ -59,8 +68,10 @@ def test_extract_adf_nested():
             ]},
         ],
     }
-    assert "Error" in extract_adf_text(node)
-    assert "occurs here" in extract_adf_text(node)
+    result = extract_adf_text(node)
+    assert "Error" in result
+    assert "occurs here" in result
+    assert result == "Error  occurs here"
 
 def test_extract_adf_none_returns_empty():
     assert extract_adf_text(None) == ""
@@ -123,6 +134,14 @@ def test_md_to_jira_fenced_code_no_language():
     result = md_to_jira("```\nsome code\n```")
     assert "{code}" in result
     assert "some code" in result
+
+def test_md_to_jira_fenced_code_backticks_not_converted():
+    # Backticks inside a fenced block must not be converted to {{}}
+    text = "```python\nresult = obj.method(`key`)\n```"
+    result = md_to_jira(text)
+    assert "{code:python}" in result
+    # The backtick inside the code block must not become {{key}}
+    assert "{{key}}" not in result
 
 def test_md_to_jira_unordered_list_dash():
     assert "* item" in md_to_jira("- item")
