@@ -66,8 +66,17 @@ def build_rca_message(
 
 def md_to_jira(text: str) -> str:
     """Convert Markdown to Jira wiki markup."""
-    text = re.sub(r'```(\w+)\n([\s\S]*?)```', r'{code:\1}\n\2{code}', text)
-    text = re.sub(r'```\n?([\s\S]*?)```', r'{code}\n\1{code}', text)
+    # Extract fenced code blocks first so backticks inside them are not
+    # converted to {{inline}} by the inline-code substitution below.
+    fenced: list[str] = []
+
+    def _store(m: re.Match) -> str:
+        fenced.append(m.group(0))
+        return f'__FENCED_{len(fenced) - 1}__'
+
+    text = re.sub(r'```\w*\n[\s\S]*?```', _store, text)
+
+    # Apply all other transformations on the placeholder-safe text.
     text = re.sub(r'`([^`\n]+)`', r'{{\1}}', text)
     text = re.sub(r'\*\*(.+?)\*\*', r'*\1*', text)
     text = re.sub(r'^### (.+)$', r'h3. \1', text, flags=re.MULTILINE)
@@ -77,6 +86,20 @@ def md_to_jira(text: str) -> str:
     text = re.sub(r'^[ \t]*[-*] (.+)$', r'* \1', text, flags=re.MULTILINE)
     text = re.sub(r'^---+$', r'----', text, flags=re.MULTILINE)
     text = re.sub(r'\n{3,}', '\n\n', text)
+
+    # Restore fenced blocks, converting them to Jira {code} syntax.
+    def _convert(block: str) -> str:
+        m = re.match(r'```(\w+)\n([\s\S]*?)```', block)
+        if m:
+            return f'{{code:{m.group(1)}}}\n{m.group(2)}{{code}}'
+        m = re.match(r'```\n?([\s\S]*?)```', block)
+        if m:
+            return f'{{code}}\n{m.group(1)}{{code}}'
+        return block
+
+    for i, block in enumerate(fenced):
+        text = text.replace(f'__FENCED_{i}__', _convert(block))
+
     return text.strip()
 
 

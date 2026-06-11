@@ -271,10 +271,11 @@ async def rca(request: RcaRequest):
 
     try:
         issue = await fetch_jira_issue(JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN, issue_key)
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=502, detail=f"Jira API error fetching {issue_key}: {e.response.status_code}")
+    except (httpx.HTTPStatusError, httpx.RequestError) as e:
+        detail = f"Jira API error fetching {issue_key}: {e.response.status_code}" if isinstance(e, httpx.HTTPStatusError) else f"Jira connection error: {e}"
+        raise HTTPException(status_code=502, detail=detail)
 
-    summary = issue["fields"]["summary"]
+    summary = issue["fields"].get("summary", "(no summary)")
     desc_adf = issue["fields"].get("description")
     description = extract_adf_text(desc_adf).strip() if desc_adf else "No description provided."
 
@@ -304,11 +305,9 @@ async def rca(request: RcaRequest):
 
     try:
         await post_jira_comment(JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN, issue_key, jira_body)
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Failed to post Jira comment on {issue_key}: {e.response.status_code}",
-        )
+    except (httpx.HTTPStatusError, httpx.RequestError) as e:
+        detail = f"Failed to post Jira comment on {issue_key}: {e.response.status_code}" if isinstance(e, httpx.HTTPStatusError) else f"Jira connection error posting comment: {e}"
+        raise HTTPException(status_code=502, detail=detail)
 
     return {
         "response": rca_text,
