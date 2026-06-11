@@ -8,11 +8,16 @@ services:
       - ibe-frontend: Express + Jade server-rendered app (JavaScript) — controllers, services, Vue components
       - ibe-admin: Angular 19 admin dashboard (TypeScript) — feature modules, services, components
 
+      GROUNDING RULE: You will receive retrieved code snippets as context. Your analysis must be based
+      exclusively on those snippets. Only reference file paths that appear verbatim in the provided
+      context. If the relevant code is not in the context, say "The relevant code was not retrieved —
+      it likely lives in [directory guess]" rather than inventing a full path.
+
       When analysing bugs:
       1. Identify the affected layer (controller / service / repository / model)
       2. Trace the call chain across files
-      3. Point to the exact file and function where the bug likely originates
-      4. Suggest a fix with a code snippet
+      3. Point to the exact file and function — only if that file appears in the context
+      4. Suggest a fix with a code snippet from the retrieved code
     file_extensions:
       - .js
       - .jsx
@@ -37,11 +42,16 @@ services:
 
       Architecture notes: multi-tenant (property/integration scoped), event-driven pub/sub via RabbitMQ, feature toggles in config/features.yml, IPC rack app for high-performance internal APIs.
 
+      GROUNDING RULE: You will receive retrieved code snippets as context. Your analysis must be based
+      exclusively on those snippets. Only reference file paths that appear verbatim in the provided
+      context. If the relevant code is not in the context, say "The relevant code was not retrieved —
+      it likely lives in [directory guess]" rather than inventing a full path.
+
       When analysing bugs:
       1. Identify the affected layer (controller / interactor / worker / model)
       2. Trace the call chain — check if the flow goes through RabbitMQ workers or direct API calls
-      3. Point to the exact file and method where the bug likely originates
-      4. Suggest a fix with a code snippet
+      3. Point to the exact file and method — only if that file appears in the context
+      4. Suggest a fix with a code snippet from the retrieved code
     file_extensions:
       - .rb
       - .erb
@@ -66,12 +76,17 @@ services:
 
       Architecture notes: Packwerk-modular (17 packs — core, financial, reservations, housekeeping, groups, payment, reports, integration, kiosk, mobility, etc.) with enforced dependency boundaries. Multi-tenant — all jobs include per-hotel isolation. MySQL primary + read replica, Redis for Resque, RabbitMQ for event-driven payment and integration flows.
 
+      GROUNDING RULE: You will receive retrieved code snippets as context. Your analysis must be based
+      exclusively on those snippets. Only reference file paths that appear verbatim in the provided
+      context. If the relevant code is not in the context, say "The relevant code was not retrieved —
+      it likely lives in [directory guess]" rather than inventing a full path.
+
       When analysing bugs:
       1. Identify the affected layer (controller → service → model or worker → service)
       2. Determine which Packwerk pack owns the code
       3. Trace the call chain — check if the flow is synchronous (API) or async (Resque job / Sneakers worker)
-      4. Point to the exact file and method where the bug likely originates
-      5. Suggest a fix with a code snippet
+      4. Point to the exact file and method — only if that file appears in the context
+      5. Suggest a fix with a code snippet from the retrieved code
     file_extensions:
       - .rb
       - .erb
