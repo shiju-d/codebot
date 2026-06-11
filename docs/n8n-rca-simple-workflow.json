@@ -1,0 +1,62 @@
+{
+  "name": "Jira RCA - Simple",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "s1",
+      "name": "Chat Trigger",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "jira-rca-simple"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/rca",
+        "sendBody": true,
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "input", "value": "={{ $json.chatInput }}" },
+            { "name": "session_id", "value": "" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "s2",
+      "name": "Ask codebot RCA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return { output: $('Ask codebot RCA').item.json.output };"
+      },
+      "id": "s3",
+      "name": "Respond to Chat",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    }
+  ],
+  "connections": {
+    "Chat Trigger": {
+      "main": [
+        [{ "node": "Ask codebot RCA", "type": "main", "index": 0 }]
+      ]
+    },
+    "Ask codebot RCA": {
+      "main": [
+        [{ "node": "Respond to Chat", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
