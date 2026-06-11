@@ -21,7 +21,7 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:1143
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20241022-v2:0")
+BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "global.anthropic.claude-sonnet-4-5-20250929-v1:0")
 SERVICES_CONFIG_PATH = os.getenv("SERVICES_CONFIG_PATH", "/app/services.yaml")
 
 local_llm = Ollama(base_url=OLLAMA_BASE_URL, model="qwen2.5-coder:7b", request_timeout=120.0)
@@ -84,7 +84,7 @@ def _get_engine(session_id: str, service_name: str, llm, llm_key: str):
                 chat_mode="context",
                 llm=llm,
                 memory=memory,
-                similarity_top_k=4,
+                similarity_top_k=8,
                 system_prompt=svc["system_prompt"],
             ),
         }
