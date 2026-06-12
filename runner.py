@@ -1,6 +1,7 @@
 import asyncio
 import httpx
 import os
+import threading
 import traceback
 from collections import OrderedDict
 from contextlib import asynccontextmanager
@@ -23,6 +24,9 @@ from jira import (
     md_to_jira, fetch_jira_issue, post_jira_comment,
 )
 from llama_index.postprocessor.flag_embedding_reranker import FlagEmbeddingReranker
+from llama_index.core.retrievers import QueryFusionRetriever
+from llama_index.core.retrievers.fusion_retriever import FUSION_MODES
+from llama_index.core.chat_engine import ContextChatEngine
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
@@ -86,12 +90,15 @@ print("[startup] Settings.prompt_helper: context_window=200000, num_output=2048"
 MAX_SESSIONS = 100
 
 _reranker: FlagEmbeddingReranker | None = None
+_reranker_lock = threading.Lock()
 
 
 def _get_reranker() -> FlagEmbeddingReranker:
     global _reranker
     if _reranker is None:
-        _reranker = FlagEmbeddingReranker(model="BAAI/bge-reranker-base", top_n=12)
+        with _reranker_lock:
+            if _reranker is None:
+                _reranker = FlagEmbeddingReranker(model="BAAI/bge-reranker-base", top_n=12)
     return _reranker
 
 
@@ -107,13 +114,21 @@ def _get_engine(session_id: str, service_name: str, llm, llm_key: str):
             sessions.popitem(last=False)
         memory = ChatMemoryBuffer.from_defaults(token_limit=4096)
         svc = services[service_name]
+        base_retriever = svc["index"].as_retriever(similarity_top_k=10)
+        fusion_retriever = QueryFusionRetriever(
+            retrievers=[base_retriever],
+            llm=llm,
+            num_queries=3,
+            mode=FUSION_MODES.RECIPROCAL_RANK,
+            use_async=True,
+        )
         sessions[session_id] = {
             "memory": memory,
-            "engine": svc["index"].as_chat_engine(
-                chat_mode="context",
+            "engine": ContextChatEngine.from_defaults(
+                retriever=fusion_retriever,
                 llm=llm,
                 memory=memory,
-                similarity_top_k=12,
+                node_postprocessors=[_get_reranker()],
                 system_prompt=svc["system_prompt"],
             ),
         }
