@@ -2,6 +2,7 @@ from collections import OrderedDict
 from unittest.mock import patch, MagicMock, AsyncMock
 import pytest
 from fastapi.testclient import TestClient
+from llama_index.core.retrievers.fusion_retriever import FUSION_MODES
 import runner
 
 
@@ -111,12 +112,15 @@ def test_get_engine_wires_fusion_retriever_and_reranker(client):
     mock_base_retriever = MagicMock()
     mock_fusion_retriever = MagicMock()
     mock_engine = MagicMock()
+    mock_memory = MagicMock()
 
     runner.services["ibe"]["index"].as_retriever.return_value = mock_base_retriever
 
-    with patch("runner._get_reranker", return_value=mock_reranker) as mock_gr, \
+    with patch("runner._get_reranker", return_value=mock_reranker), \
          patch("runner.QueryFusionRetriever", return_value=mock_fusion_retriever) as mock_qfr, \
-         patch("runner.ContextChatEngine") as mock_cce:
+         patch("runner.ContextChatEngine") as mock_cce, \
+         patch("runner.ChatMemoryBuffer") as mock_mem_cls:
+        mock_mem_cls.from_defaults.return_value = mock_memory
         mock_cce.from_defaults.return_value = mock_engine
 
         engine = runner._get_engine("test-fusion-session", "ibe", runner.local_llm, "local")
@@ -126,12 +130,15 @@ def test_get_engine_wires_fusion_retriever_and_reranker(client):
     qfr_kwargs = mock_qfr.call_args.kwargs
     assert qfr_kwargs["num_queries"] == 3
     assert qfr_kwargs["use_async"] is True
+    assert qfr_kwargs["similarity_top_k"] == 30
     assert qfr_kwargs["retrievers"] == [mock_base_retriever]
+    assert qfr_kwargs["mode"] == FUSION_MODES.RECIPROCAL_RANK
     mock_cce.from_defaults.assert_called_once()
     cce_kwargs = mock_cce.from_defaults.call_args.kwargs
     assert cce_kwargs["retriever"] is mock_fusion_retriever
     assert mock_reranker in cce_kwargs["node_postprocessors"]
-    assert engine is mock_engine
+    assert cce_kwargs["llm"] is runner.local_llm
+    assert cce_kwargs["memory"] is mock_memory
 
     # cleanup so this session doesn't pollute other tests
     runner.services["ibe"]["sessions"]["local"].pop("test-fusion-session", None)

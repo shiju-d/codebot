@@ -121,6 +121,7 @@ def _get_engine(session_id: str, service_name: str, llm, llm_key: str):
             num_queries=3,
             mode=FUSION_MODES.RECIPROCAL_RANK,
             use_async=True,
+            similarity_top_k=30,
         )
         sessions[session_id] = {
             "memory": memory,
