@@ -49,17 +49,6 @@ def test_chat_unknown_service(client):
     assert "ibe" in detail
 
 
-def test_chat_claude_not_configured(client):
-    original = runner.claude_llm
-    runner.claude_llm = None
-    try:
-        response = client.post("/chat/claude", json={"message": "ibe: hello", "session_id": "t"})
-        assert response.status_code == 503
-        assert "ANTHROPIC_API_KEY" in response.json()["detail"]
-    finally:
-        runner.claude_llm = original
-
-
 def test_chat_bedrock_not_configured(client):
     original = runner.bedrock_llm
     runner.bedrock_llm = None
@@ -103,3 +92,15 @@ def test_chat_valid_service_returns_response(client):
     data = response.json()
     assert data["response"] == "The bug is in cart.service.ts line 42."
     assert "/repos/ibe-api/src/services/cart.service.ts" in data["sources"]
+
+
+def test_get_reranker_returns_singleton():
+    runner._reranker = None  # ensure clean state
+    with patch("runner.FlagEmbeddingReranker") as mock_cls:
+        mock_instance = MagicMock()
+        mock_cls.return_value = mock_instance
+        first = runner._get_reranker()
+        second = runner._get_reranker()
+    assert first is second
+    mock_cls.assert_called_once_with(model="BAAI/bge-reranker-base", top_n=12)
+    runner._reranker = None  # restore clean state

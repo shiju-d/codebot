@@ -22,6 +22,7 @@ from jira import (
     parse_rca_input, extract_adf_text, build_rca_message,
     md_to_jira, fetch_jira_issue, post_jira_comment,
 )
+from llama_index.postprocessor.flag_embedding_reranker import FlagEmbeddingReranker
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
@@ -83,6 +84,16 @@ Settings.prompt_helper = PromptHelper(context_window=200000, num_output=2048)
 print("[startup] Settings.prompt_helper: context_window=200000, num_output=2048")
 
 MAX_SESSIONS = 100
+
+_reranker: FlagEmbeddingReranker | None = None
+
+
+def _get_reranker() -> FlagEmbeddingReranker:
+    global _reranker
+    if _reranker is None:
+        _reranker = FlagEmbeddingReranker(model="BAAI/bge-reranker-base", top_n=12)
+    return _reranker
+
 
 # { service_name: { "index": VectorStoreIndex, "system_prompt": str,
 #                   "sessions": { "local": OrderedDict, "bedrock": OrderedDict } } }
