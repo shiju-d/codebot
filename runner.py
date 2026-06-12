@@ -13,6 +13,7 @@ from llama_index.core.memory import ChatMemoryBuffer
 from llama_index.llms.ollama import Ollama
 from llama_index.llms.bedrock_converse import BedrockConverse
 from llama_index.core.llms import LLMMetadata
+from llama_index.core.indices.prompt_helper import PromptHelper
 from llama_index.embeddings.ollama import OllamaEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from config import load_services, ServiceConfig
@@ -72,6 +73,15 @@ bedrock_llm = BedrockConverse(
 
 Settings.embed_model = OllamaEmbedding(base_url=OLLAMA_BASE_URL, model_name="mxbai-embed-large")
 
+# Set a large PromptHelper globally so all response synthesizers get the full
+# 200k context window. BedrockConverse reports context_window=4091 for any
+# model ID it doesn't recognise (e.g. global.anthropic.* inference profiles),
+# which makes long RCA prompts produce a negative available_context_size in
+# CompactAndRefine. Setting Settings.prompt_helper here overrides the LLM
+# metadata lookup that get_response_synthesizer falls back to.
+Settings.prompt_helper = PromptHelper(context_window=200000, num_output=2048)
+print("[startup] Settings.prompt_helper: context_window=200000, num_output=2048")
+
 MAX_SESSIONS = 100
 
 # { service_name: { "index": VectorStoreIndex, "system_prompt": str,
@@ -92,7 +102,7 @@ def _get_engine(session_id: str, service_name: str, llm, llm_key: str):
                 chat_mode="context",
                 llm=llm,
                 memory=memory,
-                similarity_top_k=8,
+                similarity_top_k=12,
                 system_prompt=svc["system_prompt"],
             ),
         }
