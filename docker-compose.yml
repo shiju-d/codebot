@@ -6,6 +6,7 @@ services:
     volumes:
       - ./services.yaml:/app/services.yaml:ro
       - chroma_data:/app/chroma_db
+      - hf_cache:/root/.cache/huggingface
       - ${REPO_ROOT}/ibe-api:/repos/ibe-api:ro
       - ${REPO_ROOT}/ibe-frontend:/repos/ibe-frontend:ro
       - ${REPO_ROOT}/ibe-admin:/repos/ibe-admin:ro
@@ -17,3 +18,4 @@ services:
 
 volumes:
   chroma_data:
+  hf_cache:
