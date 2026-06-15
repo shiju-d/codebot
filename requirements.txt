@@ -1,4 +1,5 @@
 llama-index
+tree-sitter<0.22
 tree-sitter-languages
 llama-index-llms-ollama
 llama-index-llms-anthropic

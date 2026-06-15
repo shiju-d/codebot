@@ -186,3 +186,165 @@ def _parse_ruby(source: str, file_path: str, service: str) -> ParsedFile:
     parsed = ParsedFile(file_path=file_path, service=service, language='ruby')
     _walk_ruby(tree.root_node, parsed, [], [])
     return parsed
+
+
+# ---------------------------------------------------------------------------
+# TypeScript / JavaScript tree-sitter helpers
+# ---------------------------------------------------------------------------
+
+def _ts_class_name(class_node) -> Optional[str]:
+    name_child = class_node.child_by_field_name('name')
+    if name_child and name_child.type in ('type_identifier', 'identifier'):
+        return name_child.text.decode('utf-8')
+    return None
+
+
+def _ts_superclass_name(class_node) -> Optional[str]:
+    for child in class_node.children:
+        if child.type == 'class_heritage':
+            for heritage_child in child.children:
+                if heritage_child.type == 'extends_clause':
+                    for ext_child in heritage_child.children:
+                        if ext_child.type in ('identifier', 'type_identifier'):
+                            return ext_child.text.decode('utf-8')
+    return None
+
+
+def _walk_ts_js(node, parsed: ParsedFile, class_stack: list, method_stack: list) -> None:
+    t = node.type
+
+    if t == 'import_statement':
+        source_node = node.child_by_field_name('source')
+        if source_node:
+            frag = next(
+                (c for c in source_node.children if c.type == 'string_fragment'),
+                None,
+            )
+            if frag:
+                import_str = frag.text.decode('utf-8')
+                parsed.requires.append(_RequireEdge(
+                    from_path=parsed.file_path,
+                    require_str=import_str,
+                    is_relative=import_str.startswith('.'),
+                ))
+        return
+
+    if t in ('class_declaration', 'abstract_class_declaration'):
+        class_name = _ts_class_name(node)
+        if class_name:
+            parent = _ts_superclass_name(node)
+            parsed.classes.append(_ClassNode(name=class_name, parent=parent))
+            class_stack.append(class_name)
+            for child in node.children:
+                _walk_ts_js(child, parsed, class_stack, method_stack)
+            class_stack.pop()
+        return
+
+    if t == 'method_definition' and class_stack:
+        name_child = node.child_by_field_name('name')
+        if name_child:
+            mname = name_child.text.decode('utf-8')
+            parsed.methods.append(_MethodNode(
+                name=mname,
+                class_name=class_stack[-1],
+                start_line=node.start_point[0],
+                end_line=node.end_point[0],
+            ))
+            method_stack.append(mname)
+            for child in node.children:
+                _walk_ts_js(child, parsed, class_stack, method_stack)
+            method_stack.pop()
+        return
+
+    if t == 'function_declaration':
+        name_child = node.child_by_field_name('name')
+        if name_child:
+            fname = name_child.text.decode('utf-8')
+            cls = class_stack[-1] if class_stack else '__module__'
+            parsed.methods.append(_MethodNode(
+                name=fname,
+                class_name=cls,
+                start_line=node.start_point[0],
+                end_line=node.end_point[0],
+            ))
+            method_stack.append(fname)
+            for child in node.children:
+                _walk_ts_js(child, parsed, class_stack, method_stack)
+            method_stack.pop()
+        return
+
+    if t == 'call_expression' and class_stack and method_stack:
+        func_child = node.child_by_field_name('function')
+        if func_child:
+            if func_child.type == 'identifier':
+                parsed.calls.append(_CallEdge(
+                    from_class=class_stack[-1],
+                    from_method=method_stack[-1],
+                    to_method=func_child.text.decode('utf-8'),
+                ))
+            elif func_child.type == 'member_expression':
+                prop = func_child.child_by_field_name('property')
+                if prop:
+                    parsed.calls.append(_CallEdge(
+                        from_class=class_stack[-1],
+                        from_method=method_stack[-1],
+                        to_method=prop.text.decode('utf-8'),
+                    ))
+
+    for child in node.children:
+        _walk_ts_js(child, parsed, class_stack, method_stack)
+
+
+def _parse_ts_js(source: str, file_path: str, service: str, language: str) -> ParsedFile:
+    parser = get_parser(language)
+    tree = parser.parse(source.encode('utf-8'))
+    parsed = ParsedFile(file_path=file_path, service=service, language=language)
+    _walk_ts_js(tree.root_node, parsed, [], [])
+    return parsed
+
+
+# ---------------------------------------------------------------------------
+# Path resolution — converts require strings to absolute file paths
+# ---------------------------------------------------------------------------
+
+import os as _os
+
+
+def _resolve_require(
+    require_str: str,
+    current_abs_path: str,
+    is_relative: bool,
+    repo_roots: list[str],
+) -> Optional[str]:
+    """Resolve a Ruby require string to an absolute path, or None if not found."""
+    if is_relative:
+        base = _os.path.join(_os.path.dirname(current_abs_path), require_str)
+        for ext in ('', '.rb'):
+            candidate = _os.path.normpath(base + ext)
+            if _os.path.exists(candidate):
+                return candidate
+        return None
+    for repo_root in repo_roots:
+        for search_dir in (
+            _os.path.join(repo_root, 'lib'),
+            repo_root,
+        ):
+            for ext in ('', '.rb'):
+                candidate = _os.path.normpath(_os.path.join(search_dir, require_str + ext))
+                if _os.path.exists(candidate):
+                    return candidate
+    return None
+
+
+def _resolve_ts_import(import_str: str, current_abs_path: str) -> Optional[str]:
+    """Resolve a relative TS/JS import to an absolute path, or None."""
+    if not import_str.startswith('.'):
+        return None
+    base = _os.path.normpath(
+        _os.path.join(_os.path.dirname(current_abs_path), import_str)
+    )
+    for suffix in ('', '.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx', '/index.js'):
+        candidate = base + suffix
+        if _os.path.exists(candidate):
+            return candidate
+    return None
