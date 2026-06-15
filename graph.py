@@ -438,7 +438,8 @@ def build_service_graph(svc: ServiceConfig, driver: neo4j.Driver) -> None:
                 rel_path = abs_path.removeprefix(repos_prefix)
                 abs_to_rel[abs_path] = rel_path
                 try:
-                    source = open(abs_path, encoding='utf-8', errors='replace').read()
+                    with open(abs_path, encoding='utf-8', errors='replace') as fh:
+                        source = fh.read()
                     if lang == 'ruby':
                         parsed = _parse_ruby(source, rel_path, svc.name)
                     else:
@@ -579,8 +580,7 @@ def build_service_graph(svc: ServiceConfig, driver: neo4j.Driver) -> None:
 def clear_service_graph(service_name: str, driver: neo4j.Driver) -> None:
     """Delete all nodes and relationships for a service from Neo4j."""
     with driver.session() as session:
-        session.run(
-            "MATCH (n {service: $service}) DETACH DELETE n",
-            service=service_name,
-        )
+        session.run("MATCH (n:File {service: $service}) DETACH DELETE n", service=service_name)
+        session.run("MATCH (n:Method {service: $service}) DETACH DELETE n", service=service_name)
+        session.run("MATCH (n:Class {service: $service}) DETACH DELETE n", service=service_name)
     print(f"[graph:{service_name}] Graph cleared.")
