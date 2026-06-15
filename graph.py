@@ -1,9 +1,15 @@
+import os
 from dataclasses import dataclass, field
 from typing import Optional
 
 from tree_sitter_languages import get_parser
 
 _RUBY_PARSER = get_parser('ruby')
+_TS_PARSERS: dict = {
+    'typescript': get_parser('typescript'),
+    'tsx': get_parser('tsx'),
+    'javascript': get_parser('javascript'),
+}
 
 # ---------------------------------------------------------------------------
 # Internal data classes — represent parsed graph elements before writing to Neo4j
@@ -273,6 +279,28 @@ def _walk_ts_js(node, parsed: ParsedFile, class_stack: list, method_stack: list)
             method_stack.pop()
         return
 
+    if t == 'lexical_declaration':
+        for decl in node.children:
+            if decl.type == 'variable_declarator':
+                name_child = decl.child_by_field_name('name')
+                value_child = decl.child_by_field_name('value')
+                if (name_child and value_child
+                        and name_child.type == 'identifier'
+                        and value_child.type == 'arrow_function'):
+                    fname = name_child.text.decode('utf-8')
+                    cls = class_stack[-1] if class_stack else '__module__'
+                    parsed.methods.append(_MethodNode(
+                        name=fname,
+                        class_name=cls,
+                        start_line=decl.start_point[0],
+                        end_line=decl.end_point[0],
+                    ))
+                    method_stack.append(fname)
+                    for child in value_child.children:
+                        _walk_ts_js(child, parsed, class_stack, method_stack)
+                    method_stack.pop()
+        return
+
     if t == 'call_expression' and class_stack and method_stack:
         func_child = node.child_by_field_name('function')
         if func_child:
@@ -296,7 +324,7 @@ def _walk_ts_js(node, parsed: ParsedFile, class_stack: list, method_stack: list)
 
 
 def _parse_ts_js(source: str, file_path: str, service: str, language: str) -> ParsedFile:
-    parser = get_parser(language)
+    parser = _TS_PARSERS.get(language) or get_parser(language)
     tree = parser.parse(source.encode('utf-8'))
     parsed = ParsedFile(file_path=file_path, service=service, language=language)
     _walk_ts_js(tree.root_node, parsed, [], [])
@@ -307,8 +335,6 @@ def _parse_ts_js(source: str, file_path: str, service: str, language: str) -> Pa
 # Path resolution — converts require strings to absolute file paths
 # ---------------------------------------------------------------------------
 
-import os as _os
-
 
 def _resolve_require(
     require_str: str,
@@ -318,20 +344,20 @@ def _resolve_require(
 ) -> Optional[str]:
     """Resolve a Ruby require string to an absolute path, or None if not found."""
     if is_relative:
-        base = _os.path.join(_os.path.dirname(current_abs_path), require_str)
+        base = os.path.join(os.path.dirname(current_abs_path), require_str)
         for ext in ('', '.rb'):
-            candidate = _os.path.normpath(base + ext)
-            if _os.path.exists(candidate):
+            candidate = os.path.normpath(base + ext)
+            if os.path.exists(candidate):
                 return candidate
         return None
     for repo_root in repo_roots:
         for search_dir in (
-            _os.path.join(repo_root, 'lib'),
+            os.path.join(repo_root, 'lib'),
             repo_root,
         ):
             for ext in ('', '.rb'):
-                candidate = _os.path.normpath(_os.path.join(search_dir, require_str + ext))
-                if _os.path.exists(candidate):
+                candidate = os.path.normpath(os.path.join(search_dir, require_str + ext))
+                if os.path.exists(candidate):
                     return candidate
     return None
 
@@ -340,11 +366,11 @@ def _resolve_ts_import(import_str: str, current_abs_path: str) -> Optional[str]:
     """Resolve a relative TS/JS import to an absolute path, or None."""
     if not import_str.startswith('.'):
         return None
-    base = _os.path.normpath(
-        _os.path.join(_os.path.dirname(current_abs_path), import_str)
+    base = os.path.normpath(
+        os.path.join(os.path.dirname(current_abs_path), import_str)
     )
     for suffix in ('', '.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx', '/index.js'):
         candidate = base + suffix
-        if _os.path.exists(candidate):
+        if os.path.exists(candidate):
             return candidate
     return None
