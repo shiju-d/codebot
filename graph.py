@@ -1,12 +1,9 @@
-import os
 from dataclasses import dataclass, field
 from typing import Optional
 
-import neo4j
 from tree_sitter_languages import get_parser
 
-from config import ServiceConfig
-
+_RUBY_PARSER = get_parser('ruby')
 
 # ---------------------------------------------------------------------------
 # Internal data classes — represent parsed graph elements before writing to Neo4j
@@ -69,8 +66,7 @@ def _ruby_node_name(node) -> Optional[str]:
     if name_child.type == 'constant':
         return name_child.text.decode('utf-8')
     if name_child.type == 'scope_resolution':
-        right = name_child.child_by_field_name('name') or name_child.children[-1]
-        return right.text.decode('utf-8')
+        return name_child.text.decode('utf-8')
     return None
 
 
@@ -79,11 +75,8 @@ def _ruby_superclass_name(class_node) -> Optional[str]:
     if not sc:
         return None
     for child in sc.children:
-        if child.type == 'constant':
+        if child.type in ('constant', 'scope_resolution'):
             return child.text.decode('utf-8')
-        if child.type == 'scope_resolution':
-            right = child.child_by_field_name('name') or child.children[-1]
-            return right.text.decode('utf-8')
     return None
 
 
@@ -139,14 +132,18 @@ def _walk_ruby(node, parsed: ParsedFile, class_stack: list, method_stack: list) 
             for child in node.children:
                 _walk_ruby(child, parsed, class_stack, method_stack)
             class_stack.pop()
+        else:
+            for child in node.children:
+                _walk_ruby(child, parsed, class_stack, method_stack)
         return
 
-    if t in ('method', 'singleton_method') and class_stack:
+    if t in ('method', 'singleton_method'):
         mname = _ruby_method_name_from_def(node)
         if mname:
+            cls = class_stack[-1] if class_stack else '__module__'
             parsed.methods.append(_MethodNode(
                 name=mname,
-                class_name=class_stack[-1],
+                class_name=cls,
                 start_line=node.start_point[0],
                 end_line=node.end_point[0],
             ))
@@ -185,8 +182,7 @@ def _walk_ruby(node, parsed: ParsedFile, class_stack: list, method_stack: list) 
 
 
 def _parse_ruby(source: str, file_path: str, service: str) -> ParsedFile:
-    parser = get_parser('ruby')
-    tree = parser.parse(source.encode('utf-8'))
+    tree = _RUBY_PARSER.parse(source.encode('utf-8'))
     parsed = ParsedFile(file_path=file_path, service=service, language='ruby')
     _walk_ruby(tree.root_node, parsed, [], [])
     return parsed
