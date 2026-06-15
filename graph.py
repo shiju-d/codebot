@@ -1,6 +1,9 @@
 import os
+import neo4j
 from dataclasses import dataclass, field
 from typing import Optional
+
+from config import ServiceConfig
 
 from tree_sitter_languages import get_parser
 
@@ -374,3 +377,210 @@ def _resolve_ts_import(import_str: str, current_abs_path: str) -> Optional[str]:
         if os.path.exists(candidate):
             return candidate
     return None
+
+
+# ---------------------------------------------------------------------------
+# Neo4j write logic
+# ---------------------------------------------------------------------------
+
+_EXCLUDED_DIRS = frozenset({
+    'node_modules', 'dist', '.git', 'log', 'tmp', 'vendor',
+    'coverage', '__tests__', 'cypress', 'e2e',
+})
+
+_EXT_TO_LANGUAGE: dict[str, str] = {
+    '.rb': 'ruby',
+    '.rake': 'ruby',
+    '.ts': 'typescript',
+    '.tsx': 'tsx',
+    '.js': 'javascript',
+    '.jsx': 'javascript',
+}
+
+
+def _ensure_constraints(session: neo4j.Session) -> None:
+    session.run("""
+        CREATE CONSTRAINT file_path_unique IF NOT EXISTS
+        FOR (f:File) REQUIRE (f.path, f.service) IS UNIQUE
+    """)
+    session.run("""
+        CREATE CONSTRAINT method_unique IF NOT EXISTS
+        FOR (m:Method) REQUIRE (m.file_path, m.name, m.class_name) IS UNIQUE
+    """)
+
+
+def _batch_write(
+    session: neo4j.Session, query: str, params: list[dict], batch_size: int = 500
+) -> None:
+    for i in range(0, len(params), batch_size):
+        batch = params[i:i + batch_size]
+        if batch:
+            session.run(query, nodes=batch)
+
+
+def build_service_graph(svc: ServiceConfig, driver: neo4j.Driver) -> None:
+    """Parse all files in svc.repos and write nodes/edges to Neo4j."""
+
+    # --- Step 1: walk repos, parse every supported file ---
+    all_parsed: list[tuple[str, str, ParsedFile]] = []  # (abs_path, rel_path, parsed)
+    abs_to_rel: dict[str, str] = {}
+
+    for repo_path in svc.repos:
+        repos_prefix = os.path.dirname(repo_path).rstrip('/') + '/'
+        for root, dirs, files in os.walk(repo_path):
+            dirs[:] = [d for d in dirs if d not in _EXCLUDED_DIRS]
+            for fname in files:
+                ext = os.path.splitext(fname)[1].lower()
+                lang = _EXT_TO_LANGUAGE.get(ext)
+                if not lang:
+                    continue
+                abs_path = os.path.join(root, fname)
+                rel_path = abs_path.removeprefix(repos_prefix)
+                abs_to_rel[abs_path] = rel_path
+                try:
+                    source = open(abs_path, encoding='utf-8', errors='replace').read()
+                    if lang == 'ruby':
+                        parsed = _parse_ruby(source, rel_path, svc.name)
+                    else:
+                        parsed = _parse_ts_js(source, rel_path, svc.name, lang)
+                    all_parsed.append((abs_path, rel_path, parsed))
+                except Exception as exc:
+                    print(f"[graph:{svc.name}] Parse error {rel_path}: {exc}")
+
+    print(f"[graph:{svc.name}] Parsed {len(all_parsed)} files.")
+
+    # --- Step 2: resolve REQUIRES edges to rel_paths ---
+    requires_edges: list[dict] = []
+    for abs_path, rel_path, parsed in all_parsed:
+        for req in parsed.requires:
+            if parsed.language == 'ruby':
+                resolved = _resolve_require(
+                    req.require_str, abs_path, req.is_relative, svc.repos
+                )
+            else:
+                resolved = _resolve_ts_import(req.require_str, abs_path)
+            if resolved and resolved in abs_to_rel:
+                requires_edges.append({
+                    'from_path': rel_path,
+                    'to_path': abs_to_rel[resolved],
+                    'service': svc.name,
+                })
+
+    # --- Step 3: write nodes and edges to Neo4j ---
+    with driver.session() as session:
+        _ensure_constraints(session)
+
+        # File nodes
+        _batch_write(session, """
+            UNWIND $nodes AS n
+            MERGE (f:File {path: n.path, service: n.service})
+            SET f.language = n.language
+        """, [
+            {'path': rel_path, 'service': svc.name, 'language': p.language}
+            for _, rel_path, p in all_parsed
+        ])
+
+        # Class nodes + DEFINES edges
+        class_params = [
+            {'file_path': rel_path, 'class_name': cls.name, 'service': svc.name}
+            for _, rel_path, p in all_parsed
+            for cls in p.classes
+        ]
+        _batch_write(session, """
+            UNWIND $nodes AS n
+            MERGE (c:Class {name: n.class_name, service: n.service})
+            SET c.file_path = n.file_path
+            WITH c, n
+            MATCH (f:File {path: n.file_path, service: n.service})
+            MERGE (f)-[:DEFINES]->(c)
+        """, class_params)
+
+        # INHERITS edges
+        inherits_params = [
+            {'child': cls.name, 'parent': cls.parent, 'service': svc.name}
+            for _, _, p in all_parsed
+            for cls in p.classes
+            if cls.parent
+        ]
+        _batch_write(session, """
+            UNWIND $nodes AS n
+            MATCH (child:Class {name: n.child, service: n.service})
+            MERGE (parent:Class {name: n.parent, service: n.service})
+            MERGE (child)-[:INHERITS]->(parent)
+        """, inherits_params)
+
+        # INCLUDES edges
+        includes_params = [
+            {'class_name': inc.class_name, 'module_name': inc.module_name, 'service': svc.name}
+            for _, _, p in all_parsed
+            for inc in p.includes
+        ]
+        _batch_write(session, """
+            UNWIND $nodes AS n
+            MATCH (cls:Class {name: n.class_name, service: n.service})
+            MERGE (mod:Class {name: n.module_name, service: n.service})
+            MERGE (cls)-[:INCLUDES]->(mod)
+        """, includes_params)
+
+        # Method nodes + HAS_METHOD edges
+        method_params = [
+            {
+                'name': m.name,
+                'class_name': m.class_name,
+                'file_path': rel_path,
+                'service': svc.name,
+                'start_line': m.start_line,
+                'end_line': m.end_line,
+            }
+            for _, rel_path, p in all_parsed
+            for m in p.methods
+        ]
+        _batch_write(session, """
+            UNWIND $nodes AS n
+            MERGE (m:Method {name: n.name, class_name: n.class_name, file_path: n.file_path})
+            SET m.service = n.service, m.start_line = n.start_line, m.end_line = n.end_line
+            WITH m, n
+            MATCH (c:Class {name: n.class_name, service: n.service})
+            MERGE (c)-[:HAS_METHOD]->(m)
+        """, method_params)
+
+        # REQUIRES edges
+        _batch_write(session, """
+            UNWIND $nodes AS n
+            MATCH (from:File {path: n.from_path, service: n.service})
+            MATCH (to:File {path: n.to_path, service: n.service})
+            MERGE (from)-[:REQUIRES]->(to)
+        """, requires_edges)
+
+        # CALLS edges (best-effort: match by method name + service, cross-file only)
+        calls_params = [
+            {
+                'from_method': c.from_method,
+                'from_class': c.from_class,
+                'from_file': rel_path,
+                'to_method': c.to_method,
+                'service': svc.name,
+            }
+            for _, rel_path, p in all_parsed
+            for c in p.calls
+        ]
+        _batch_write(session, """
+            UNWIND $nodes AS n
+            MATCH (from_m:Method {name: n.from_method, class_name: n.from_class, file_path: n.from_file})
+            MATCH (to_m:Method {name: n.to_method, service: n.service})
+            WHERE to_m.file_path <> n.from_file
+            MERGE (from_m)-[:CALLS]->(to_m)
+        """, calls_params)
+
+    print(f"[graph:{svc.name}] Graph written: {len(all_parsed)} files, "
+          f"{len(requires_edges)} REQUIRES edges.")
+
+
+def clear_service_graph(service_name: str, driver: neo4j.Driver) -> None:
+    """Delete all nodes and relationships for a service from Neo4j."""
+    with driver.session() as session:
+        session.run(
+            "MATCH (n {service: $service}) DETACH DELETE n",
+            service=service_name,
+        )
+    print(f"[graph:{service_name}] Graph cleared.")
