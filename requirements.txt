@@ -12,3 +12,4 @@ pyyaml
 pytest
 httpx
 llama-index-postprocessor-flag-embedding-reranker
+neo4j

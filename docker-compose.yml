@@ -1,4 +1,14 @@
 services:
+  neo4j:
+    image: neo4j:5
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      - NEO4J_AUTH=neo4j/codebot-secret
+    volumes:
+      - neo4j_data:/data
+
   codebot:
     build: .
     ports:
@@ -15,7 +25,10 @@ services:
     env_file: .env
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      - neo4j
 
 volumes:
   chroma_data:
   hf_cache:
+  neo4j_data:
