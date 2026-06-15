@@ -27,6 +27,8 @@ from llama_index.postprocessor.flag_embedding_reranker import FlagEmbeddingReran
 from llama_index.core.retrievers import QueryFusionRetriever
 from llama_index.core.retrievers.fusion_retriever import FUSION_MODES
 from llama_index.core.chat_engine import ContextChatEngine
+import graph as _graph
+from graph_postprocessor import GraphExpansionPostprocessor
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
@@ -37,6 +39,8 @@ SERVICES_CONFIG_PATH = os.getenv("SERVICES_CONFIG_PATH", "/app/services.yaml")
 JIRA_BASE_URL = os.getenv("JIRA_BASE_URL", "")
 JIRA_EMAIL = os.getenv("JIRA_EMAIL", "")
 JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN", "")
+NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "codebot-secret")
 
 local_llm = Ollama(base_url=OLLAMA_BASE_URL, model="qwen2.5-coder:7b", request_timeout=120.0)
 
@@ -92,6 +96,18 @@ MAX_SESSIONS = 100
 _reranker: FlagEmbeddingReranker | None = None
 _reranker_lock = threading.Lock()
 
+neo4j_driver = None
+try:
+    import neo4j as _neo4j_lib
+    neo4j_driver = _neo4j_lib.GraphDatabase.driver(
+        NEO4J_URI, auth=("neo4j", NEO4J_PASSWORD)
+    )
+    neo4j_driver.verify_connectivity()
+    print(f"[startup] Neo4j connected: {NEO4J_URI}")
+except Exception as _neo4j_exc:
+    print(f"[startup] Neo4j not available ({_neo4j_exc}); graph expansion disabled")
+    neo4j_driver = None
+
 
 def _get_reranker() -> FlagEmbeddingReranker:
     global _reranker
@@ -123,13 +139,17 @@ def _get_engine(session_id: str, service_name: str, llm, llm_key: str):
             use_async=True,
             similarity_top_k=30,
         )
+        postprocessors = []
+        if svc.get("graph_postprocessor"):
+            postprocessors.append(svc["graph_postprocessor"])
+        postprocessors.append(_get_reranker())
         sessions[session_id] = {
             "memory": memory,
             "engine": ContextChatEngine.from_defaults(
                 retriever=fusion_retriever,
                 llm=llm,
                 memory=memory,
-                node_postprocessors=[_get_reranker()],
+                node_postprocessors=postprocessors,
                 system_prompt=svc["system_prompt"],
             ),
         }
@@ -221,12 +241,30 @@ def _build_service_index(svc: ServiceConfig):
 def _init_all_services():
     global services
     configs = load_services(SERVICES_CONFIG_PATH)
+    chroma_client = chromadb.PersistentClient(path="/app/chroma_db")
     for svc in configs:
         index = _build_service_index(svc)
+
+        if neo4j_driver:
+            try:
+                _graph.build_service_graph(svc, neo4j_driver)
+            except Exception as exc:
+                print(f"[graph:{svc.name}] Graph build failed ({exc}); continuing without graph")
+
+        graph_pp = None
+        if neo4j_driver:
+            collection = chroma_client.get_or_create_collection(f"{svc.name}_codebase")
+            graph_pp = GraphExpansionPostprocessor(
+                service_name=svc.name,
+                chroma_collection=collection,
+                driver=neo4j_driver,
+            )
+
         services[svc.name] = {
             "index": index,
             "system_prompt": svc.system_prompt,
             "jira_project_key": svc.jira_project_key,
+            "graph_postprocessor": graph_pp,
             "sessions": {
                 "local": OrderedDict(),
                 "bedrock": OrderedDict(),
@@ -404,13 +442,32 @@ async def reindex_all():
             chroma_client.delete_collection(f"{svc.name}_codebase")
         except Exception as e:
             print(f"[reindex] Warning: could not delete collection {svc.name}_codebase: {e}")
+        if neo4j_driver:
+            try:
+                _graph.clear_service_graph(svc.name, neo4j_driver)
+            except Exception as e:
+                print(f"[reindex] Warning: could not clear graph {svc.name}: {e}")
 
     new_services: dict = {}
     for svc in configs:
         index = await asyncio.to_thread(_build_service_index, svc)
+        if neo4j_driver:
+            try:
+                await asyncio.to_thread(_graph.build_service_graph, svc, neo4j_driver)
+            except Exception as exc:
+                print(f"[graph:{svc.name}] Graph build failed ({exc}); continuing without graph")
+        graph_pp = None
+        if neo4j_driver:
+            collection = chroma_client.get_or_create_collection(f"{svc.name}_codebase")
+            graph_pp = GraphExpansionPostprocessor(
+                service_name=svc.name,
+                chroma_collection=collection,
+                driver=neo4j_driver,
+            )
         new_services[svc.name] = {
             "index": index,
             "system_prompt": svc.system_prompt,
+            "graph_postprocessor": graph_pp,
             "sessions": {
                 "local": OrderedDict(),
                 "bedrock": OrderedDict(),
@@ -445,10 +502,28 @@ async def reindex_service(service_name: str):
         for llm_sessions in services[service_name]["sessions"].values():
             llm_sessions.clear()
 
+    if neo4j_driver:
+        try:
+            _graph.clear_service_graph(service_name, neo4j_driver)
+            await asyncio.to_thread(_graph.build_service_graph, svc_config, neo4j_driver)
+        except Exception as exc:
+            print(f"[graph:{service_name}] Graph rebuild failed ({exc}); continuing without graph")
+
+    graph_pp = None
+    if neo4j_driver:
+        chroma_client = chromadb.PersistentClient(path="/app/chroma_db")
+        collection = chroma_client.get_or_create_collection(f"{service_name}_codebase")
+        graph_pp = GraphExpansionPostprocessor(
+            service_name=service_name,
+            chroma_collection=collection,
+            driver=neo4j_driver,
+        )
+
     services[service_name] = {
         "index": index,
         "system_prompt": svc_config.system_prompt,
         "jira_project_key": svc_config.jira_project_key,
+        "graph_postprocessor": graph_pp,
         "sessions": services.get(service_name, {}).get("sessions", {
             "local": OrderedDict(),
             "bedrock": OrderedDict(),
