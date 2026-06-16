@@ -5,7 +5,7 @@ from typing import Optional
 
 from config import ServiceConfig
 
-from tree_sitter_languages import get_parser
+from tree_sitter_language_pack import get_parser
 
 _RUBY_PARSER = get_parser('ruby')
 _TS_PARSERS: dict = {
