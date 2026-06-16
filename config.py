@@ -10,7 +10,6 @@ class ServiceConfig:
     system_prompt: str
     repos: list[str]
     file_extensions: list[str] = None
-    jira_project_key: str = None
 
     def __post_init__(self):
         if self.file_extensions is None:
@@ -26,7 +25,6 @@ def load_services(path: str) -> list[ServiceConfig]:
             system_prompt=svc["system_prompt"],
             repos=svc["repos"],
             file_extensions=svc.get("file_extensions"),
-            jira_project_key=svc.get("jira_project_key"),
         )
         for svc in data["services"]
     ]

@@ -71,15 +71,6 @@ def list_services():
     return {"services": list(engine.services.keys())}
 
 
-@app.get("/project/{project_key}")
-def resolve_project(project_key: str):
-    upper = project_key.upper()
-    for name, svc in engine.services.items():
-        if svc.get("jira_project_key") == upper:
-            return {"service": name, "project_key": upper}
-    raise HTTPException(status_code=404, detail=f"No service mapped to Jira project '{project_key}'")
-
-
 @app.post("/chat")
 async def chat_local(request: ChatRequest):
     return await _chat(request, local_llm, "local")

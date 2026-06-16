@@ -66,7 +66,6 @@ def _make_service_entry(svc, index, chroma_client=None) -> dict:
     return {
         "index": index,
         "system_prompt": svc.system_prompt,
-        "jira_project_key": svc.jira_project_key,
         "graph_postprocessor": graph_pp,
         "sessions": {
             "local": OrderedDict(),
