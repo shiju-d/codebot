@@ -467,6 +467,7 @@ async def reindex_all():
         new_services[svc.name] = {
             "index": index,
             "system_prompt": svc.system_prompt,
+            "jira_project_key": svc.jira_project_key,
             "graph_postprocessor": graph_pp,
             "sessions": {
                 "local": OrderedDict(),
@@ -511,7 +512,6 @@ async def reindex_service(service_name: str):
 
     graph_pp = None
     if neo4j_driver:
-        chroma_client = chromadb.PersistentClient(path="/app/chroma_db")
         collection = chroma_client.get_or_create_collection(f"{service_name}_codebase")
         graph_pp = GraphExpansionPostprocessor(
             service_name=service_name,
