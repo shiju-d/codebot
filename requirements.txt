@@ -12,4 +12,8 @@ pyyaml
 pytest
 httpx
 llama-index-postprocessor-flag-embedding-reranker
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+FlagEmbedding
+transformers<5.0
 neo4j
