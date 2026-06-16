@@ -63,7 +63,7 @@ def test_chat_bedrock_not_configured(client):
 
 def test_reindex_unknown_service(client):
     response = client.post("/reindex/xyz")
-    assert response.status_code == 400
+    assert response.status_code == 404
     assert "Unknown service 'xyz'" in response.json()["detail"]
 
 
