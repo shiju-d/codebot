@@ -1,4 +1,4 @@
-# How codebot works
+# How it works
 
 codebot is a RAG-powered code assistant that answers questions about Stayntouch codebases and performs root cause analysis on Jira tickets. It runs as a FastAPI service backed by ChromaDB (vector search), Neo4j (code graph), a local LLM via Ollama, and Claude on AWS Bedrock.
 

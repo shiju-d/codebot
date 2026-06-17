@@ -1,0 +1,75 @@
+{
+  "name": "Chat (Local LLM)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Chat — Local LLM\n\nAsk codebot questions about a service codebase using the local Ollama model (`qwen2.5-coder:7b`). Fast, free, no cloud credentials needed.\n\n**Input format:**\n`service: your question`\n\n**Examples:**\n```\nrover-ifc: how does the OTA rate push work?\nibe: what does the cart service do?\npms: explain the end-of-day job\n```\n\nThe session is preserved across messages in the same chat window — you can ask follow-up questions.\n\n**Requires:** Ollama running on the host with `qwen2.5-coder:7b` and `mxbai-embed-large` pulled.",
+        "height": 400,
+        "width": 340,
+        "color": 5
+      },
+      "id": "sticky1",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-380, 80]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "c1",
+      "name": "Chat Trigger",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "codebot-chat-local"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/chat",
+        "sendBody": true,
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "message", "value": "={{ $json.chatInput }}" },
+            { "name": "session_id", "value": "={{ $json.sessionId }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c2",
+      "name": "Ask codebot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const data = $('Ask codebot').item.json;\nconst sources = (data.sources || []).filter(Boolean);\nconst sourcesText = sources.length > 0\n  ? '\\n\\n---\\n**Sources:**\\n' + sources.map(s => `- \\`${s}\\``).join('\\n')\n  : '';\nreturn { output: data.response + sourcesText };"
+      },
+      "id": "c3",
+      "name": "Respond to Chat",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    }
+  ],
+  "connections": {
+    "Chat Trigger": {
+      "main": [
+        [{ "node": "Ask codebot", "type": "main", "index": 0 }]
+      ]
+    },
+    "Ask codebot": {
+      "main": [
+        [{ "node": "Respond to Chat", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

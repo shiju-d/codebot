@@ -1,6 +1,19 @@
 {
-  "name": "Jira RCA - Simple",
+  "name": "RCA",
   "nodes": [
+    {
+      "parameters": {
+        "content": "## RCA Workflow\n\nRuns root cause analysis on a Jira ticket and posts the result as a Jira comment automatically.\n\n**Input format:**\n`service: TICKET-KEY`\n\n**Examples:**\n```\nrover-ifc: CICO-134027\nibe: IBE-1152\npms: PMS-456\n```\n\nOptionally add context after the ticket key:\n```\nrover-ifc: CICO-134027 focus on the channex rate exporter\n```\n\n**Requires:** AWS Bedrock credentials and Jira API token configured in codebot `.env`.",
+        "height": 380,
+        "width": 340,
+        "color": 5
+      },
+      "id": "sticky1",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-380, 100]
+    },
     {
       "parameters": {
         "options": {}

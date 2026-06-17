@@ -1,0 +1,67 @@
+{
+  "name": "Reindex",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Reindex Workflow\n\nRebuilds the vector index and code graph for one or all services. Run this after pulling new commits for a repo.\n\n**Input:** service name or `all`\n\n**Examples:**\n```\nrover-ifc\nibe\npms\nall\n```\n\n- A specific service name calls `POST /reindex/{service}` — faster, touches only that service.\n- `all` calls `POST /reindex` — rebuilds everything, takes several minutes.\n\n**When to reindex:**\n- After pulling new commits to a repo\n- After adding a new service to `services.yaml`\n- If search results feel stale",
+        "height": 400,
+        "width": 340,
+        "color": 5
+      },
+      "id": "sticky1",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-380, 80]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "r1",
+      "name": "Chat Trigger",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "codebot-reindex"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.chatInput.trim().toLowerCase() === 'all' ? 'http://host.docker.internal:8000/reindex' : 'http://host.docker.internal:8000/reindex/' + $json.chatInput.trim() }}",
+        "options": {}
+      },
+      "id": "r2",
+      "name": "Trigger Reindex",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const data = $('Trigger Reindex').item.json;\nif (data.services) {\n  return { output: `✅ Reindexed all services: ${data.services.join(', ')}` };\n}\nreturn { output: `✅ Reindexed **${data.service}**` };"
+      },
+      "id": "r3",
+      "name": "Respond to Chat",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    }
+  ],
+  "connections": {
+    "Chat Trigger": {
+      "main": [
+        [{ "node": "Trigger Reindex", "type": "main", "index": 0 }]
+      ]
+    },
+    "Trigger Reindex": {
+      "main": [
+        [{ "node": "Respond to Chat", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

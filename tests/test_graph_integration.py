@@ -56,7 +56,6 @@ def svc(fixture_repo):
         repos=[str(fixture_repo)],
         system_prompt="Test",
         file_extensions=[".rb"],
-        jira_project_key="TEST",
     )
 
 

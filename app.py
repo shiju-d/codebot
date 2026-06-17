@@ -55,7 +55,7 @@ async def _chat(request: ChatRequest, llm, llm_key: str):
 
     try:
         eng = engine.get_engine(request.session_id, service_name, llm, llm_key)
-        response = await asyncio.to_thread(eng.chat, message)
+        response = await eng.achat(message)
         sources = list({
             node.metadata.get("file_path", "unknown")
             for node in response.source_nodes
@@ -130,7 +130,7 @@ async def rca(request: RcaRequest):
 
     try:
         eng = engine.get_engine(session_id, service_name, bedrock_llm, "bedrock")
-        response = await asyncio.to_thread(eng.chat, message)
+        response = await eng.achat(message)
         rca_text = response.response
         sources = list({
             node.metadata.get("file_path", "unknown")

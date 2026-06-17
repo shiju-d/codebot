@@ -86,7 +86,7 @@ def test_chat_valid_service_returns_response(client):
     mock_response.source_nodes = [mock_node]
 
     mock_engine = MagicMock()
-    mock_engine.chat.return_value = mock_response
+    mock_engine.achat = AsyncMock(return_value=mock_response)
 
     with patch("engine.get_engine", return_value=mock_engine):
         response = client.post("/chat", json={"message": "ibe: why is checkout failing?", "session_id": "t"})
