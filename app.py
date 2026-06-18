@@ -5,13 +5,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from llms import local_llm, bedrock_llm, JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN
+from llms import local_llm, bedrock_llm, JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN, \
+    ELASTIC_URL, ELASTIC_API_KEY, ELASTIC_INDEX
 import engine
 from message import parse_message
-from jira import (
-    parse_rca_input, extract_adf_text, build_rca_message,
-    md_to_jira, fetch_jira_issue, post_jira_comment,
-)
+from elastic import fetch_elastic_logs, resolve_time_spec
+from jira import extract_adf_text, md_to_jira, fetch_jira_issue, post_jira_comment
+from rca import parse_rca_input, build_rca_message
 
 
 class ChatRequest(BaseModel):
@@ -104,7 +104,7 @@ async def rca(request: RcaRequest):
         raise HTTPException(status_code=503, detail="RAG engine is initializing")
 
     try:
-        service_name, issue_key, additional_context = parse_rca_input(request.input)
+        service_name, issue_key, additional_context, time_spec = parse_rca_input(request.input)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -125,8 +125,21 @@ async def rca(request: RcaRequest):
     desc_adf = issue["fields"].get("description")
     description = extract_adf_text(desc_adf).strip() if desc_adf else "No description provided."
 
+    log_context = ""
+    if time_spec and ELASTIC_URL and ELASTIC_API_KEY:
+        try:
+            from_dt, to_dt = resolve_time_spec(time_spec)
+            log_context = await fetch_elastic_logs(
+                ELASTIC_URL, ELASTIC_API_KEY, ELASTIC_INDEX,
+                from_dt=from_dt,
+                to_dt=to_dt,
+            )
+            print(f"[rca] Fetched {log_context.count(chr(10)) + 1 if log_context else 0} log lines from Elasticsearch")
+        except Exception as e:
+            print(f"[rca] Elasticsearch log fetch failed: {e}")
+
     session_id = request.session_id or f"jira-{issue_key}"
-    message = build_rca_message(service_name, issue_key, summary, description, additional_context)
+    message = build_rca_message(service_name, issue_key, summary, description, additional_context, log_context)
 
     try:
         eng = engine.get_engine(session_id, service_name, bedrock_llm, "bedrock")

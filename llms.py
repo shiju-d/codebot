@@ -20,6 +20,9 @@ JIRA_EMAIL = os.getenv("JIRA_EMAIL", "")
 JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN", "")
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "codebot-secret")
+ELASTIC_URL = os.getenv("ELASTIC_URL", "")
+ELASTIC_API_KEY = os.getenv("ELASTIC_API_KEY", "")
+ELASTIC_INDEX = os.getenv("ELASTIC_INDEX", "logs-*")
 
 local_llm = Ollama(base_url=OLLAMA_BASE_URL, model="qwen2.5-coder:7b", request_timeout=120.0)
 
